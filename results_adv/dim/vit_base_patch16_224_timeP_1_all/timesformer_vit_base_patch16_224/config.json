@@ -1,0 +1,38 @@
+{
+    "test_dir": "../../../data/drive_2/ucf101/annotations_svt",
+    "image_list": "",
+    "data_type": "ucf101",
+    "src_model": "vit_base_patch16_224_timeP_1",
+    "tar_model": "timesformer_vit_base_patch16_224",
+    "scale_size": 256,
+    "img_size": 224,
+    "batch_size": 10,
+    "pre_trained": "pretrained_video_models/transformation/1_frame_avgprompt/ucf/vit/1_224_joint_1p_no_timeembed/results/checkpoint_epoch_00015.pyth",
+    "tar_pre_trained": "pretrained_video_models/timesformer/ucf/8_224_joint/results/checkpoint_epoch_00015.pyth",
+    "num_classes": 101,
+    "drop": 0.0,
+    "drop_path": 0.1,
+    "attn_drop_rate": 0.0,
+    "attack_type": "dim",
+    "eps": 16,
+    "iter": 10,
+    "index": "all",
+    "target_label": -1,
+    "num_frames": 1,
+    "num_spatial_crops": 3,
+    "num_temporal_views": 3,
+    "video_sampling_rate": 32,
+    "num_gpus": 1,
+    "num_workers": 10,
+    "video_mean": [
+        0.45,
+        0.45,
+        0.45
+    ],
+    "video_std": [
+        0.225,
+        0.225,
+        0.225
+    ],
+    "dir": "results_adv/dim/vit_base_patch16_224_timeP_1_all/timesformer_vit_base_patch16_224"
+}
