@@ -5,6 +5,8 @@ from typing import Tuple, Any
 from einops import rearrange
 from matplotlib import pyplot as plt
 import numpy as np
+import copy
+
 
 import torch
 import torchvision
@@ -36,10 +38,10 @@ vit_model_names = sorted(name for name in vit_models.__dict__
 
 robust_model_names = ['resnet50_l2_eps0.01', 'resnet50_linf_eps8.0', 'resnet50_linf_eps0.5']
 
-video_model_names = ['vit_base_patch16_224_timeP_1', 'dino_base_patch16_224_1P', 'clip_base_patch16_224_1P', 'timesformer_vit_base_patch16_224', 'resnet50-3D']
+video_model_names = ['deit_base_patch16_224_timeP_1_base_prompt','deit_base_patch16_224_timeP_1_full_1568','vit_base_patch16_224_base_lin','deit_base_patch16_224_timeP_1_cat','deit_base_patch16_224_timeP_1_org','deit_base_patch16_224_base_lin', 'deit_base_patch16_224_base_prompt','deit_base_patch16_224_timeP_1','vit_base_patch16_224_timeP_1', 'dino_base_patch16_224_1P', 'clip_base_patch16_224_1P', 'timesformer_vit_base_patch16_224', 'resnet50-3D']
 
 
-def get_model(model_name, num_classes, args, pretrained=True):
+def get_model(model_name, num_classes, args, pretrained=True, is_src=False):
 
     # models with different normalization
     model_names_diff_norm = ['vit_base_patch16_224',
@@ -102,7 +104,12 @@ def get_model(model_name, num_classes, args, pretrained=True):
         std = (0.26862954, 0.26130258, 0.27577711)
     
     elif model_name in video_model_names:
-        model = build_model(args, model_name)
+        if is_src:
+            args2 = copy.deepcopy(args)
+            args2.num_frames = args.src_frames
+        else:
+            args2 = copy.deepcopy(args)
+        model = build_model(args2, model_name)
 
         ## normalisation for video models is done in dataloader so no need to do it again
         mean = (0, 0, 0)

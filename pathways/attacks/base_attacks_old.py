@@ -88,16 +88,6 @@ def base_adv(model, mean, std, img, label, target, args, video_data):
             loss_sup = criterion(out_adv[-1], label)
             loss_unsup = similarity(features_adv[-1].view(size, -1),
                                      features_img[-1].view(size, -1)).mean()
-        
-        elif isinstance(out_adv, tuple) and index == 'all':
-            loss_sup = 0
-            loss_unsup = 0
-            for idx in range(len(out_adv[0])):
-                loss_sup += (criterion(out_adv[0][idx], label) + criterion(out_adv[1][idx], label))
-                loss_unsup = (similarity(features_adv[0][idx].view(size, -1),
-                                        features_img[0][idx].view(size, -1)).mean() + similarity(features_adv[1][idx].view(size, -1), features_img[1][idx].view(size, -1)).mean())
-
-
         else:
             loss = criterion(out_adv, label)
 
@@ -110,20 +100,12 @@ def base_adv(model, mean, std, img, label, target, args, video_data):
         loss.backward(retain_graph=True)
         if video_data:
             grads = torch.Tensor().to(img.device)
-            mid_grad = None
-            if args.add_grad or args.prod_grad:
-                mid_grad = F.conv2d(adv.grad[:, :, args.num_frames // 2, :, :], gaussian_kernel, bias=None, stride=1, padding=(2,2), groups=3)
             for i_grad in range(adv.grad.shape[2]):
                 # print(args.replicate_grad)
                 if args.replicate_grad:
                     tmp = i_grad
                     i_grad = args.num_frames // 2
-                if args.add_grad and i_grad != args.num_frames // 2:
-                    grad = F.conv2d(adv.grad[:, :, i_grad, :, :], gaussian_kernel, bias=None, stride=1, padding=(2,2), groups=3) + mid_grad
-                elif args.prod_grad and i_grad != args.num_frames // 2:
-                    grad = F.conv2d(adv.grad[:, :, i_grad, :, :], gaussian_kernel, bias=None, stride=1, padding=(2,2), groups=3) * mid_grad
-                else:
-                    grad = F.conv2d(adv.grad[:, :, i_grad, :, :], gaussian_kernel, bias=None, stride=1, padding=(2,2), groups=3)
+                grad = F.conv2d(adv.grad[:, :, i_grad, :, :], gaussian_kernel, bias=None, stride=1, padding=(2,2), groups=3)
                 if args.replicate_grad:
                     i_grad = tmp
                 grads = torch.cat((grads, grad.unsqueeze(2)), dim=2)

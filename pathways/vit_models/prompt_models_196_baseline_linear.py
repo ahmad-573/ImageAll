@@ -3,8 +3,7 @@ import torch.nn as nn
 from functools import partial
 import torch.nn.functional as F
 
-# from timesformer.models.vit_utils import trunc_normal_
-from timm.models.layers import trunc_normal_
+from timesformer.models.vit_utils import trunc_normal_
 
 from .build import MODEL_REGISTRY
 from torch import einsum
@@ -15,7 +14,7 @@ from timm.models.vision_transformer import VisionTransformer as Images_VIT, _cfg
 from .clip import LayerNorm, Transformer
 
 class resPromptVisionTransformer(Images_VIT):
-    def __init__(self, *args,actual_num_classes=400,qk_scale=None, num_prompts=1, num_frames=8, img_size=224, attention_type='divided_space_time', **kwargs):
+    def __init__(self, *args,actual_num_classes=400,qk_scale=None, num_prompts=1, num_frames=8, img_size=224, attention_type='divided_space_time', num_cross=1, **kwargs):
         super().__init__(*args,**kwargs)
 
         self.patch_size = kwargs['patch_size']
@@ -31,10 +30,9 @@ class resPromptVisionTransformer(Images_VIT):
         attn_drop_rate = kwargs['attn_drop_rate']
         self.num_prompts = num_prompts
         self.attention_type = attention_type
+        self.num_frames = num_frames
         num_frames = num_frames
         img_size = img_size
-        self.num_frames = num_frames
-        print("CLASSES:", num_classes, actual_num_classes)
 
         act_layer = None
         act_layer = act_layer or nn.GELU
@@ -50,12 +48,7 @@ class resPromptVisionTransformer(Images_VIT):
                 attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer, act_layer=act_layer)
             for i in range(self.depth)])
 
-        ## new parameters for the prompt model
-        self.transformation = Block(dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale, drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[0], norm_layer=norm_layer,attention_type=self.attention_type)
-        self.resPrompt_token = nn.Parameter(torch.zeros(1, self.num_prompts, self.embed_dim))
-        self.head_resPrompt = nn.Linear(self.embed_dim, num_classes) if num_classes > 0 else nn.Identity()
-
-        trunc_normal_(self.resPrompt_token, std=.02)
+        self.head_new = nn.Linear(self.embed_dim, num_classes) if num_classes > 0 else nn.Identity()
         self.apply(self._init_weights)
 
     def _init_weights(self, m):
@@ -92,23 +85,13 @@ class resPromptVisionTransformer(Images_VIT):
         return x
 
     def forward_features(self, x):
-        is_image = False
-        if len(x.shape) == 4:
-            is_image = True
-            ## mimicking a 1 frame video
-            x = x.unsqueeze(2)
-
-        ## Patch Embed
+        x = x[:,:,self.num_frames // 2, :, :].unsqueeze(2)
         B = x.shape[0]
         x,T,W = self.patch_embed(x)
+        
+        # x = rearrange(x, '(b t) n m -> b t n m', t=T)
 
         cls_tokens = self.cls_token.expand(x.size(0), -1, -1)
-
-        ## transformation if the input is a video
-        if not is_image:
-            x = rearrange(x[:,:,:], '(b t) n m -> b (n t) m',t=T)
-            transformation = self.transformation(x[:,:,:],B,T,W,is_cls=False)
-            x = rearrange(x[:,:,:], 'b (n t) m -> (b t) n m',t=T)
         
         x = torch.cat((cls_tokens, x), dim=1)
         
@@ -116,14 +99,9 @@ class resPromptVisionTransformer(Images_VIT):
         ## Spatial embedding
         x = self.spatial_embedding(x,W)
 
-        if not is_image: 
-            cls_tokens = x[:B, 0, :].unsqueeze(1)
-            x = rearrange(x[:,1:,:], '(b t) n m -> b n t m',b=B,t=T).mean(dim=2)
-            x = torch.cat((cls_tokens, x), dim=1)
-
-            ## prompt token
-            resPrompt_token = self.resPrompt_token.expand(B, -1, -1) + transformation.mean(dim=1, keepdim=True)
-            x = torch.cat((resPrompt_token, x), dim=1)
+        # cls_tokens = x[:B, 0, :].unsqueeze(1)
+        # x = rearrange(x[:,1:,:], '(b t) n m -> b n t m',b=B,t=T).mean(dim=2)
+        # x = torch.cat((cls_tokens, x), dim=1)
 
         layer_wise_tokens = []
         attention_maps = []
@@ -132,18 +110,15 @@ class resPromptVisionTransformer(Images_VIT):
             layer_wise_tokens.append(x)
             attention_maps.append(attn)
 
-        return layer_wise_tokens, attention_maps, is_image
+        return layer_wise_tokens, attention_maps
 
     def forward(self, x, all_tokens=True):
         size = x.size(0)
-        layer_wise_tokens, attention_maps, is_image = self.forward_features(x)
+        layer_wise_tokens, attention_maps = self.forward_features(x)
         layer_wise_tokens_norm = [self.norm(x) for x in layer_wise_tokens]
-        if is_image:
-            x = [self.head(x[:, 0]) for x in layer_wise_tokens_norm]
-        x_resPrompt = [self.head_resPrompt(x[:, 0:self.num_prompts].mean(dim=1)) for x in layer_wise_tokens_norm]
-        if is_image:
-            return x, layer_wise_tokens, attention_maps
-        return x_resPrompt, [xi[:,self.num_prompts] for xi in layer_wise_tokens], attention_maps  # , x
+        x = [self.head(x[:, self.num_prompts]) for x in layer_wise_tokens_norm]
+        x_cls = [self.head_new(x[:, 0]) for x in layer_wise_tokens_norm]
+        return x_cls, x_cls, attention_maps  # , x
 
 class resPromptDino(Images_VIT):
     def __init__(self, *args,actual_num_classes=400,qk_scale=None, num_prompts=1, num_frames=8, img_size=224, attention_type='divided_space_time', **kwargs):
@@ -164,6 +139,7 @@ class resPromptDino(Images_VIT):
         self.attention_type = attention_type
         num_frames = num_frames
         img_size = img_size
+        self.num_frames = num_frames
 
         act_layer = None
         act_layer = act_layer or nn.GELU
@@ -182,12 +158,8 @@ class resPromptDino(Images_VIT):
                 attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer, act_layer=act_layer)
             for i in range(self.depth)])
 
-        self.transformation = Block(dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale, drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[0], norm_layer=norm_layer,attention_type=self.attention_type)
-        self.resPrompt_token = nn.Parameter(torch.zeros(1, self.num_prompts, embed_dim))
-        self.head_resPrompt = nn.Linear(embed_dim*2, num_classes) if num_classes > 0 else nn.Identity()
+        self.head_new = nn.Linear(embed_dim*2, num_classes) if num_classes > 0 else nn.Identity()
 
-
-        trunc_normal_(self.resPrompt_token, std=.02)
         self.apply(self._init_weights)
 
     def _init_weights(self, m):
@@ -224,36 +196,20 @@ class resPromptDino(Images_VIT):
         return x
 
     def forward_features(self, x):
-        is_image = False
-        if len(x.shape) == 4:
-            is_image = True
-            x = x.unsqueeze(2)
-        
-        ## Patch Embed
+        x = x[:,:,self.num_frames // 2, :,:].unsqueeze(2)
         B = x.shape[0]
         x,T,W = self.patch_embed(x)
 
         cls_tokens = self.cls_token.expand(x.size(0), -1, -1)
 
-        ## transformation if not image
-        if not is_image:
-            x = rearrange(x[:,:,:], '(b t) n m -> b (n t) m',t=T)
-            transformation = self.transformation(x[:,:,:],B,T,W,is_cls=False).mean(dim=1, keepdim=True)
-            x = rearrange(x[:,:,:], 'b (n t) m -> (b t) n m',t=T)
-        
         x = torch.cat((cls_tokens,x),dim=1)
 
         ## Spatial embedding
         x = self.spatial_embedding(x,W)
 
-        ## Average time dim and add prompt token if not image
-        if not is_image:
-            cls_tokens = x[:B, 0, :].unsqueeze(1)
-            x = rearrange(x[:,1:,:], '(b t) n m -> b t n m',b=B,t=T).mean(dim=1)
-            x = torch.cat((cls_tokens, x), dim=1)
-
-            resPrompt_token = self.resPrompt_token.expand(B, -1, -1) + transformation
-            x = torch.cat((resPrompt_token, x), dim=1)
+        cls_tokens = x[:B, 0, :].unsqueeze(1)
+        x = rearrange(x[:,1:,:], '(b t) n m -> b n t m',b=B,t=T).mean(dim=2)
+        x = torch.cat((cls_tokens, x), dim=1)
 
         layer_wise_tokens = []
         attention_maps = []
@@ -262,33 +218,25 @@ class resPromptDino(Images_VIT):
             layer_wise_tokens.append(x)
             attention_maps.append(attn)
 
-        x = self.norm(x)
-        layer_wise_tokens_norm = [self.norm(t) for t in layer_wise_tokens]
-        return x[:, 0:self.num_prompts], x[:, self.num_prompts], x[:, self.num_prompts+1:], x[:,0], x[:,1:], is_image, layer_wise_tokens_norm
+        # x = self.norm(x)
+        return layer_wise_tokens, attention_maps
 
     def forward(self, x, all_tokens=True):
         size = x.size(0)
 
-        x_resPrompt, x_cls, x_patches, x_img_cls, x_img_patches, is_image, layer_wise_tokens = self.forward_features(x)
+        layer_wise_tokens, attention_maps = self.forward_features(x)
+        layer_wise_tokens_norm = [self.norm(x) for x in layer_wise_tokens]
 
-        if is_image:
-            x_cls = torch.cat((x_img_cls.unsqueeze(-1), torch.mean(x_img_patches, dim=1).unsqueeze(-1)), dim=-1)
-            x_cls = x_cls.reshape(size, -1)
-            x_cls = self.linear(x_cls)
-            return x_cls, x_resPrompt
+        x_cls = [x[:,0] for x in layer_wise_tokens_norm]
+        x_patches = [x[:,1:] for x in layer_wise_tokens_norm]
 
-        x_cls = torch.cat((x_cls.unsqueeze(-1), torch.mean(x_patches, dim=1).unsqueeze(-1)), dim=-1)
-        x_cls = x_cls.reshape(size, -1)
-        x_cls = self.linear(x_cls)
-
+        x_cls = [torch.cat((x_c.unsqueeze(-1), torch.mean(x_p, dim=1).unsqueeze(-1)), dim=-1) for x_c, x_p in zip(x_cls, x_patches)]
+        # x_cls = x_cls.reshape(size, -1)
+        x_cls = [x.reshape(size, -1) for x in x_cls]
         
-        x_resPrompt = [x[:, 0:self.num_prompts] for x in layer_wise_tokens]
-        x_patches = [x[:, self.num_prompts+1:] for x in layer_wise_tokens]
-        x_resPrompt = [x.mean(dim=1) for x in x_resPrompt]
-        x_resPrompt = [torch.cat((x_pr.unsqueeze(-1), torch.mean(x_pa, dim=1).unsqueeze(-1)), dim=-1) for x_pr, x_pa in zip(x_resPrompt, x_patches)]
-        x_resPrompt = [x.reshape(size, -1) for x in x_resPrompt]
-        x_resPrompt = [self.head_resPrompt(x) for x in x_resPrompt]
-        return x_resPrompt, x_cls   # , x
+        x_cls = [self.head_new(x) for x in x_cls]
+
+        return x_cls, x_cls   # , x
 
 class resPromptClip(nn.Module):
     def __init__(self, input_resolution: int, patch_size: int, width: int, layers: int, heads: int, output_dim: int, num_prompts: int, num_classes:int, num_frames: int , actual_num_classes: int, attention_type, qk_scale=None):
@@ -302,6 +250,7 @@ class resPromptClip(nn.Module):
         self.conv1 = nn.Conv2d(in_channels=3, out_channels=width, kernel_size=patch_size, stride=patch_size, bias=False)
         drop_path_rate = 0.1
         self.attention_type = attention_type
+        self.num_frames = num_frames
 
         scale = width ** -0.5
         self.class_embedding = nn.Parameter(scale * torch.randn(width))
@@ -315,25 +264,15 @@ class resPromptClip(nn.Module):
 
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate , 12)] 
 
-        self.transformation = Block(dim=self.width, num_heads=heads, mlp_ratio=4, qkv_bias=True, qk_scale=qk_scale, drop=0., attn_drop=0., drop_path=dpr[0], norm_layer=partial(nn.LayerNorm, eps=1e-6),attention_type=self.attention_type) 
-        self.resPrompt_token = nn.Parameter(torch.zeros(1, self.num_prompts, self.width))
-        self.head_resPrompt = nn.Linear(self.width, actual_num_classes) if actual_num_classes > 0 else nn.Identity()
-
-        trunc_normal_(self.resPrompt_token, std=0.02)
+        self.head_new = nn.Linear(self.width, actual_num_classes) if actual_num_classes > 0 else nn.Identity()
     
     def forward(self,x: torch.Tensor, text_project=False):
+        x = x[:, :, self.num_frames // 2, :,:].unsqueeze(2)
         B,C,T,H,W = x.shape
-
-        ## Patch Embed
         x = rearrange(x, 'b c t h w -> (b t) c h w')
         x = self.conv1(x)
         W = x.size(-1)
         x = x.flatten(2).transpose(1,2)
-        
-        ## Add transformation
-        x = rearrange(x[:,:,:], '(b t) n m -> b (n t) m',t=T)
-        transform = self.transformation(x[:,:,:],B,T,W,is_cls=False).mean(dim=1, keepdim=True)
-        x = rearrange(x[:,:,:], 'b (n t) m -> (b t) n m',t=T)
 
         x = torch.cat([self.class_embedding.to(x.dtype) + torch.zeros(x.shape[0], 1, x.shape[-1], dtype=x.dtype, device=x.device), x], dim=1)  # shape = [*, grid ** 2 + 1, width]
         
@@ -353,14 +292,9 @@ class resPromptClip(nn.Module):
         else:
             x = x + self.positional_embedding
 
-        ## Average over time
         cls_tokens = x[:B, 0, :].unsqueeze(1)
         x = rearrange(x[:,1:,:], '(b t) n m -> b n t m',b=B,t=T).mean(dim=2)
         x = torch.cat((cls_tokens, x), dim=1)
-
-        ## Add Prompt tokens
-        resPrompt_token = self.resPrompt_token.expand(B, -1, -1) + transform
-        x = torch.cat((resPrompt_token, x), dim=1)
         
         x = self.ln_pre(x)
 
@@ -368,14 +302,14 @@ class resPromptClip(nn.Module):
         x = self.transformer(x)
         x = x.permute(1,0,2)
 
-        x_resPrompt, x = x[:, 0:self.num_prompts].mean(dim=1), x[:, self.num_prompts]
+        x_cls, x = x[:, 0], x[:, 1:]
 
-        x_resPrompt, x = self.ln_post(x_resPrompt), self.ln_post(x)
+        x_cls = self.ln_post(x_cls)
         if self.proj is not None and text_project:
             # projects prompts
-            x_resPrompt = x_resPrompt @ self.proj
+            x_cls = x_cls @ self.proj
             x = x @ self.proj
         
-        x_resPrompt = self.head_resPrompt(x_resPrompt)
+        x_cls = self.head_new(x_cls)
 
-        return x_resPrompt, x
+        return x_cls, x

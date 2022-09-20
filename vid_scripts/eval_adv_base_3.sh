@@ -18,14 +18,14 @@ evaluation() {
     --tar_pre_trained "${11}" \
     --num_temporal_views 3 \
     --num_classes 101 \
-    --batch_size 8 \
+    --batch_size 10 \
     --num_frames 8 \
     --num_gpus 1 \
     --src_frames 8 \
     --eps 70 \
-    --num_div_gpus 1 \
-    --add_grad True \
-    --variation "new_loss_actual"
+    --prod_grad True \
+    --variation "prod_grad"
+
 }
 
 #for ATTACK in 'mifgsm', 'dim'; do
@@ -38,11 +38,7 @@ evaluation() {
 #  done
 #done
 
-for ATTACK in 'mifgsm' 'pgd' 'fgsm'; do
-  evaluation 'ucf101' "deit_base_patch16_224_timeP_1_cat" "timesformer_vit_base_patch16_224"  "" "$ATTACK" -1 10 16 "all" "pretrained_video_models/transformation/1_8split_cat_prompt/ucf/deit/8_224_joint_1p/results/checkpoint_epoch_00015.pyth" "pretrained_video_models/timesformer/ucf/8_224_joint/results/checkpoint_epoch_00015.pyth"
-done
-
-# evaluation 'ucf101' "deit_base_patch16_224_timeP_1_cat" "timesformer_vit_base_patch16_224"  "" "dim" -1 10 16 "all" "pretrained_video_models/transformation/1_8split_cat_prompt/ucf/deit/8_224_joint_1p/results/checkpoint_epoch_00015.pyth" "pretrained_video_models/timesformer/ucf/8_224_joint/results/checkpoint_epoch_00015.pyth"
+evaluation 'ucf101' "deit_base_patch16_224_timeP_1_cat" "timesformer_vit_base_patch16_224"  "" "dim" -1 10 16 "all" "pretrained_video_models/transformation/1_8split_cat_prompt/ucf/deit/8_224_joint_1p/results/checkpoint_epoch_00015.pyth" "pretrained_video_models/timesformer/ucf/8_224_joint/results/checkpoint_epoch_00015.pyth"
 
 #evaluation 'IN' "deit_base_patch16_224" "T2t_vit_7"  "image_list_5k.json" "pifgsm" -1 10 16 "last"
 #evaluation 'IN' "deit_base_patch16_224" "T2t_vit_7"  "image_list_5k.json" "pifgsm" -1 10 16 "all"

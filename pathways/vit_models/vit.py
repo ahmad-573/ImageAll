@@ -12,6 +12,10 @@ from .transformer_block import *
 
 from .build import MODEL_REGISTRY
 from .prompt_models_196 import resPromptVisionTransformer, resPromptDino, resPromptClip
+from .prompt_models_196_cat_prompt import resPromptVisionTransformer as catPromptVisionTransformer
+from .prompt_models_196_baseline import resPromptVisionTransformer as baselinePromptVisionTransformer
+from .prompt_models_196_baseline_linear import resPromptVisionTransformer as baselineLinearVisionTransformer
+from .prompt_models import resPromptVisionTransformer as fullPromptVisionTransformer
 from .vit_timesformer import VisionTransformer as TimesformerVisionTransformer
 default_cfgs = {
     'vit_base_patch16_224': _cfg(
@@ -123,31 +127,38 @@ def vit_large_patch16_224(pretrained=False, **kwargs):
 ############################
 #       VIDEO MODELS       #
 ############################
-@MODEL_REGISTRY.register()
-class timesformer_vit_base_patch16_224(nn.Module):
-    def __init__(self, args, **kwargs):
-        super(timesformer_vit_base_patch16_224, self).__init__()
-        self.pretrained=True
-        patch_size = 16
-        self.model = TimesformerVisionTransformer(img_size=args.img_size, num_classes=args.num_classes, patch_size=patch_size, embed_dim=768, depth=12, num_heads=12, mlp_ratio=4, qkv_bias=True, norm_layer=partial(nn.LayerNorm, eps=1e-6), drop_rate=0., attn_drop_rate=0., drop_path_rate=0.1, num_frames=8, attention_type="joint_space_time", **kwargs)
 
-        self.attention_type = "joint_space_time"
-        self.model.default_cfg = default_cfgs['vit_base_patch16_224']
-        self.num_patches = (args.img_size // patch_size) * (args.img_size // patch_size)
-
-        self.depth = self.model.depth
-        
-        for name, param in self.model.named_parameters():
-            print(name, param.shape, param.requires_grad)
-
-    def forward(self, x):
-        x = self.model(x)
-        return x
-
+## Prompt 196 original
 @MODEL_REGISTRY.register()
 class vit_base_patch16_224_timeP_1(nn.Module):
     def __init__(self, args, **kwargs):
         super(vit_base_patch16_224_timeP_1, self).__init__()
+        self.pretrained=True
+        patch_size = 16
+        self.model = resPromptVisionTransformer(img_size=args.img_size,num_classes=1000, actual_num_classes=args.num_classes, patch_size=patch_size, embed_dim=768, depth=12, num_heads=12, mlp_ratio=4, qkv_bias=True, norm_layer=partial(nn.LayerNorm, eps=1e-6), drop_rate=0., attn_drop_rate=0., drop_path_rate=0.1, num_frames=args.num_frames, attention_type='joint_space_time', **kwargs)
+
+        self.attention_type = 'joint_space_time'
+        self.model.default_cfg = default_cfgs['vit_base_patch16_224']
+        self.num_patches = (args.img_size // patch_size) * (args.img_size // patch_size)
+
+        self.depth = self.model.depth
+
+        # pretrained_model = torch.load(args.pre_trained)
+        # self.model.load_state_dict(pretrained_model['model'])
+        for name, param in self.model.named_parameters():
+            print(name, param.shape)
+
+    def forward(self, x, return_tokens=False):
+        x_resPrompt, x_features, attention_maps = self.model(x)
+        if return_tokens:
+            return x_resPrompt, x_features
+        else:
+            return x_resPrompt
+
+@MODEL_REGISTRY.register()
+class deit_base_patch16_224_timeP_1_org(nn.Module):
+    def __init__(self, args, **kwargs):
+        super(deit_base_patch16_224_timeP_1_org, self).__init__()
         self.pretrained=True
         patch_size = 16
         self.model = resPromptVisionTransformer(img_size=args.img_size,num_classes=1000, actual_num_classes=args.num_classes, patch_size=patch_size, embed_dim=768, depth=12, num_heads=12, mlp_ratio=4, qkv_bias=True, norm_layer=partial(nn.LayerNorm, eps=1e-6), drop_rate=0., attn_drop_rate=0., drop_path_rate=0.1, num_frames=args.num_frames, attention_type='joint_space_time', **kwargs)
@@ -226,6 +237,163 @@ class clip_base_patch16_224_1P(nn.Module):
     def forward(self, x):
         x_resPrompt, x_cls = self.model(x)
         return x_resPrompt
+
+
+## timesformer
+@MODEL_REGISTRY.register()
+class timesformer_vit_base_patch16_224(nn.Module):
+    def __init__(self, args, **kwargs):
+        super(timesformer_vit_base_patch16_224, self).__init__()
+        self.pretrained=True
+        patch_size = 16
+        self.model = TimesformerVisionTransformer(img_size=args.img_size, num_classes=args.num_classes, patch_size=patch_size, embed_dim=768, depth=12, num_heads=12, mlp_ratio=4, qkv_bias=True, norm_layer=partial(nn.LayerNorm, eps=1e-6), drop_rate=0., attn_drop_rate=0., drop_path_rate=0.1, num_frames=8, attention_type="joint_space_time", **kwargs)
+
+        self.attention_type = "joint_space_time"
+        self.model.default_cfg = default_cfgs['vit_base_patch16_224']
+        self.num_patches = (args.img_size // patch_size) * (args.img_size // patch_size)
+
+        self.depth = self.model.depth
+        
+        # for name, param in self.model.named_parameters():
+        #     print(name, param.shape, param.requires_grad)
+
+    def forward(self, x):
+        x = self.model(x)
+        return x
+
+## Prompt Cat Prompt
+@MODEL_REGISTRY.register()
+class deit_base_patch16_224_timeP_1_cat(nn.Module):
+    def __init__(self, args, **kwargs):
+        super(deit_base_patch16_224_timeP_1_cat, self).__init__()
+        self.pretrained=True
+        patch_size = 16
+        self.model = catPromptVisionTransformer(img_size=args.img_size,num_classes=1000, actual_num_classes=args.num_classes, patch_size=patch_size, embed_dim=768, depth=12, num_heads=12, mlp_ratio=4, qkv_bias=True, norm_layer=partial(nn.LayerNorm, eps=1e-6), drop_rate=0., attn_drop_rate=0., drop_path_rate=0.1, num_frames=args.num_frames, attention_type='joint_space_time', **kwargs)
+
+        self.attention_type = 'joint_space_time'
+        self.model.default_cfg = default_cfgs['vit_base_patch16_224']
+        self.num_patches = (args.img_size // patch_size) * (args.img_size // patch_size)
+
+        self.depth = self.model.depth
+
+        # pretrained_model = torch.load(args.pre_trained)
+        # self.model.load_state_dict(pretrained_model['model'])
+        # for name, param in self.model.named_parameters():
+        #     print(name, param.shape)
+
+    def forward(self, x, return_tokens=False):
+        x_resPrompt, x_features, attention_maps = self.model(x)
+        if return_tokens:
+            return x_resPrompt, x_features
+        else:
+            return x_resPrompt
+
+## baseline prompt
+@MODEL_REGISTRY.register()
+class deit_base_patch16_224_base_prompt(nn.Module):
+    def __init__(self, args, **kwargs):
+        super(deit_base_patch16_224_base_prompt, self).__init__()
+        self.pretrained=True
+        patch_size = 16
+        self.model = baselinePromptVisionTransformer(img_size=args.img_size,num_classes=1000, actual_num_classes=args.num_classes, patch_size=patch_size, embed_dim=768, depth=12, num_heads=12, mlp_ratio=4, qkv_bias=True, norm_layer=partial(nn.LayerNorm, eps=1e-6), drop_rate=0., attn_drop_rate=0., drop_path_rate=0.1, num_frames=args.num_frames, attention_type='joint_space_time', **kwargs)
+
+        self.attention_type = 'joint_space_time'
+        self.model.default_cfg = default_cfgs['vit_base_patch16_224']
+        self.num_patches = (args.img_size // patch_size) * (args.img_size // patch_size)
+
+        self.depth = self.model.depth
+
+        # pretrained_model = torch.load(args.pre_trained)
+        # self.model.load_state_dict(pretrained_model['model'])
+        for name, param in self.model.named_parameters():
+            print(name, param.shape)
+
+    def forward(self, x, return_tokens=False):
+        x_resPrompt, x_features, attention_maps = self.model(x)
+        if return_tokens:
+            return x_resPrompt, x_features
+        else:
+            return x_resPrompt
+
+## baseline linear
+@MODEL_REGISTRY.register()
+class deit_base_patch16_224_base_lin(nn.Module):
+    def __init__(self, args, **kwargs):
+        super(deit_base_patch16_224_base_lin, self).__init__()
+        self.pretrained=True
+        patch_size = 16
+        self.model = baselineLinearVisionTransformer(img_size=args.img_size,num_classes=1000, actual_num_classes=args.num_classes, patch_size=patch_size, embed_dim=768, depth=12, num_heads=12, mlp_ratio=4, qkv_bias=True, norm_layer=partial(nn.LayerNorm, eps=1e-6), drop_rate=0., attn_drop_rate=0., drop_path_rate=0.1, num_frames=args.num_frames, attention_type='joint_space_time', **kwargs)
+
+        self.attention_type = 'joint_space_time'
+        self.model.default_cfg = default_cfgs['vit_base_patch16_224']
+        self.num_patches = (args.img_size // patch_size) * (args.img_size // patch_size)
+
+        self.depth = self.model.depth
+
+        # pretrained_model = torch.load(args.pre_trained)
+        # self.model.load_state_dict(pretrained_model['model'])
+        for name, param in self.model.named_parameters():
+            print(name, param.shape)
+
+    def forward(self, x, return_tokens=False):
+        x_resPrompt, x_features, attention_maps = self.model(x)
+        if return_tokens:
+            return x_resPrompt, x_features
+        else:
+            return x_resPrompt
+
+@MODEL_REGISTRY.register()
+class vit_base_patch16_224_base_lin(nn.Module):
+    def __init__(self, args, **kwargs):
+        super(vit_base_patch16_224_base_lin, self).__init__()
+        self.pretrained=True
+        patch_size = 16
+        self.model = baselineLinearVisionTransformer(img_size=args.img_size,num_classes=1000, actual_num_classes=args.num_classes, patch_size=patch_size, embed_dim=768, depth=12, num_heads=12, mlp_ratio=4, qkv_bias=True, norm_layer=partial(nn.LayerNorm, eps=1e-6), drop_rate=0., attn_drop_rate=0., drop_path_rate=0.1, num_frames=args.num_frames, attention_type='joint_space_time', **kwargs)
+
+        self.attention_type = 'joint_space_time'
+        self.model.default_cfg = default_cfgs['vit_base_patch16_224']
+        self.num_patches = (args.img_size // patch_size) * (args.img_size // patch_size)
+
+        self.depth = self.model.depth
+
+        # pretrained_model = torch.load(args.pre_trained)
+        # self.model.load_state_dict(pretrained_model['model'])
+        for name, param in self.model.named_parameters():
+            print(name, param.shape)
+
+    def forward(self, x, return_tokens=False):
+        x_resPrompt, x_features, attention_maps = self.model(x)
+        if return_tokens:
+            return x_resPrompt, x_features
+        else:
+            return x_resPrompt
+
+# full 1568
+@MODEL_REGISTRY.register()
+class deit_base_patch16_224_timeP_1_full_1568(nn.Module):
+    def __init__(self, args, **kwargs):
+        super(deit_base_patch16_224_timeP_1_full_1568, self).__init__()
+        self.pretrained=True
+        patch_size = 16
+        self.model = fullPromptVisionTransformer(img_size=args.img_size,num_classes=1000, actual_num_classes=args.num_classes, patch_size=patch_size, embed_dim=768, depth=12, num_heads=12, mlp_ratio=4, qkv_bias=True, norm_layer=partial(nn.LayerNorm, eps=1e-6), drop_rate=0., attn_drop_rate=0., drop_path_rate=0.1, num_frames=args.num_frames, attention_type='joint_space_time', **kwargs)
+
+        self.attention_type = 'joint_space_time'
+        self.model.default_cfg = default_cfgs['vit_base_patch16_224']
+        self.num_patches = (args.img_size // patch_size) * (args.img_size // patch_size)
+
+        self.depth = self.model.depth
+
+        # pretrained_model = torch.load(args.pre_trained)
+        # self.model.load_state_dict(pretrained_model['model'])
+        for name, param in self.model.named_parameters():
+            print(name, param.shape)
+
+    def forward(self, x, return_tokens=False):
+        x_resPrompt, x_feats = self.model(x)
+        if return_tokens:
+            return x_resPrompt, x_feats
+        else:
+            return x_resPrompt
 
 if __name__=="__main__":
     model = create_model(

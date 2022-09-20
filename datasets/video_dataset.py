@@ -13,6 +13,7 @@ from . import utils as utils
 from . import video_container as container
 from .build import DATASET_REGISTRY
 logger = logging.get_logger(__name__)
+from .Img3D import MultiviewImgDataset
 
 
 class VideoDataLoader(torch.utils.data.Dataset):
@@ -269,6 +270,11 @@ class Ucf101(VideoDataLoader):
 class Ssv2(VideoDataLoader):
     def __init__(self, args):
         super().__init__(args)
+
+@DATASET_REGISTRY.register()
+class Img3D(MultiviewImgDataset):
+    def __init__(self, args):
+        super().__init__(root_dir=args.data_path)
 
 
 

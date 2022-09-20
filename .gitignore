@@ -3,6 +3,8 @@
 test_output/
 train_output/
 pretrained_video_models/
+results/
+results_adv/
 # timesformer/models/pretrained/
 *.pth
 *.pyth

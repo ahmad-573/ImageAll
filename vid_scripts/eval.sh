@@ -1,6 +1,6 @@
 #!/bin/bash
 
-DATA_DIR="../../../data/drive_2/hmdb51"
+DATA_DIR="../../../data/drive_2/ucf101/annotations_svt"
 
 evaluation() {
   python eval.py \
@@ -10,9 +10,10 @@ evaluation() {
     --img_size "$3" \
     --pre_trained "$4" \
     --batch_size 10 \
-    --num_classes 51 \
-    --num_temporal_views 3
+    --num_classes 101 \
+    --num_temporal_views 3 \
+    --num_frames 8
 }
 
 
-evaluation "hmdb51" "vit_base_patch16_224_timeP_1" "224" "../timesformer/TimeSformer/train_output/196/hmdb/vit/1_224_joint_1p_no_timeembed/results/checkpoint_epoch_00015.pyth" 
+evaluation "ucf101" "deit_base_patch16_224_timeP_1_cat" "224" "pretrained_video_models/transformation/1_8split_cat_prompt/ucf/deit/8_224_joint_1p/results/checkpoint_epoch_00015.pyth" 

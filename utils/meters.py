@@ -289,6 +289,6 @@ class CompareMeter(object):
         self.stats = {"split": "test_final"}
         for i in range(self.depth):
             fooled = torch.sum(self.video_preds[i].argmax(dim=-1) != self.video_labels[i].argmax(dim=-1)).item()
-            self.stats["layer_{}: fooled".format(i+1)] = fooled
+            self.stats["layer_{}: fooled".format(i+1)] = (fooled / self.video_preds[i].shape[0]) * 100.0
         return self.stats
 

@@ -11,6 +11,7 @@ import torch
 import torch.nn.functional as F
 import torchvision.utils as vutils
 from einops import reduce, rearrange
+import torch.nn as nn
 
 from pathways.utils import get_model, get_data_loader, normalize, get_attn_maps, plot_joint_overlay
 from pathways.attacks import Adv_Attack
@@ -62,16 +63,35 @@ def parse_args():
     parser.add_argument('--num_workers', type=int, default=10, help='Number of workers to use')
     parser.add_argument('--video_mean', type=list, default=([0.45, 0.45, 0.45]), help='Mean of video dataset')
     parser.add_argument('--video_std', type=list, default=([0.225, 0.225, 0.225]), help='Std of video dataset')
+    parser.add_argument('--src_frames', type=int, default=1, help='Number of frames that src model takes')
+    parser.add_argument('--num_div_gpus', type=int, default=1, help='Number of GPUs')
+    parser.add_argument('--replicate_grad', type=bool, default=False, help='copy gradient of middle frame to all frames; required when using cat prompt as src model')
+    parser.add_argument('--no_sup_loss', type=bool, default=False, help='ignore supervised loss')
+    parser.add_argument('--no_unsup_loss', type=bool, default=False, help='ignore unsupervised loss')
+    parser.add_argument('--variation', type=str, default='', help='')
+    parser.add_argument('--add_grad', type=bool, default=False, help='add gradient of middle frame to all frames; required when using cat prompt as src model')
+    parser.add_argument('--prod_grad', type=bool, default=False, help='multiply gradient of middle frame to all frames; required when using cat prompt as src model')
+    
 
     return parser.parse_args()
 
 def main():
     # setup run
     args = parse_args()
+
+    print("STARTING ATTACK:", args.attack_type)
+
     if args.attack_type in ['fgsm', 'rfgsm']:
         args.iters = 1 # single step attacks
 
-    args.dir = f"results_adv/{args.attack_type}/{args.src_model}_{args.index}/{args.tar_model}"
+    # print(args.replicate_grad)
+    # print(args.no_sup_loss)
+    # print(args.no_unsup_loss)
+
+    if args.variation == '':
+        args.dir = f"results_adv/{args.attack_type}/{args.src_model}_{args.index}_{args.data_type}/{args.tar_model}"
+    else:
+        args.dir = f"results_adv/{args.attack_type}/{args.src_model}_{args.index}_{args.variation}_{args.data_type}/{args.tar_model}"
     if not os.path.isdir(args.dir):
         os.makedirs(args.dir)
     json.dump(vars(args), open(f"{args.dir}/config.json", "w"), indent=4)
@@ -82,11 +102,14 @@ def main():
         video_data = True
 
     # GPU
-    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    device1 = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    device2 = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
 
-    src_model, src_mean, src_std = get_model(args.src_model, args.num_classes, args)
+    src_model, src_mean, src_std = get_model(args.src_model, args.num_classes, args, is_src=True)
     if args.num_gpus > 1:
         src_model = src_model.module
+    
+    device = device1
     src_model = src_model.to(device).eval()
     if args.pre_trained:
         checkpoint = torch.load(args.pre_trained)
@@ -100,8 +123,12 @@ def main():
             src_model.load_state_dict(checkpoint)
 
     tar_model, tar_mean, tar_std = get_model(args.tar_model, args.num_classes, args)
+
     if args.num_gpus > 1:
         tar_model = tar_model.module
+    ## move to data parallel
+    if args.num_div_gpus > 1:
+        device = device2
     tar_model = tar_model.to(device).eval()
     if args.tar_pre_trained:
         checkpoint = torch.load(args.tar_pre_trained)
@@ -205,8 +232,10 @@ def main():
 
     with tqdm(enumerate(test_loader), total=len(test_loader)) as prog_bar:
         for idx, image_label in prog_bar:
+            if args.num_div_gpus > 1:
+                device = device2
             img, label = image_label[0].to(device), image_label[1].to(device)
-
+        
             if video_data:
                 video_idx, meta = image_label[2].to(device), image_label[3]
                 for key, val in meta.items():
@@ -258,8 +287,16 @@ def main():
                 target = torch.LongTensor(img.size(0))
                 target.fill_(args.target_label)
                 target = target.to(device)
-
+            # if idx == 0:
+            #     vutils.save_image(vutils.make_grid(img[:,:,0,:,:], normalize=True, scale_each=True), f'org.png')
+            if args.num_div_gpus > 1:
+                img, label = img.to(device1), label.to(device1)
+                if target is not None:
+                    target = target.to(device1)
             adv = Adv_Attack(args.attack_type)(src_model, src_mean, src_std, img, label, target, args, video_data)
+            # if idx == 0:
+            #     vutils.save_image(vutils.make_grid(adv[:,:,0,:,:], normalize=True, scale_each=True), f'adv.png')
+            #     break
 
             if 'clip' in args.tar_model:
                 image_features = tar_model.encode_image(normalize(adv.clone(), mean=src_mean, std=src_std))
@@ -316,13 +353,13 @@ def main():
                 ssim_d += pytorch_ssim.ssim(img, adv).item()
                 lpips_d += loss_fn_alex((2*img-1),(2*adv-1)).view(-1,).mean().item()
 
-            if idx==0:
+            if idx==20:
                 if not video_data:
                     vutils.save_image(vutils.make_grid(adv, normalize=True, scale_each=True), f'{args.dir}/adv.png')
-                else:
-                    if args.num_frames == 1:
-                        vutils.save_image(vutils.make_grid(adv.squeeze(2), normalize=True, scale_each=True), f'{args.dir}/adv.png')
-                        vutils.save_image(vutils.make_grid(img.squeeze(2), normalize=True, scale_each=True), f'{args.dir}/org.png')
+                else: 
+                    print(adv.shape, img.shape)
+                    vutils.save_image(vutils.make_grid(adv[:,:,0,:,:], normalize=True, scale_each=True), f'{args.dir}/adv.png')
+                    vutils.save_image(vutils.make_grid(img[:,:,0,:,:], normalize=True, scale_each=True), f'{args.dir}/org.png')
             del clean_out, adv_out
 
     distance = distance/(idx+1)
